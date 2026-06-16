@@ -6,6 +6,8 @@ The effect runs entirely in the browser with no server dependencies, no WebGL, a
 
 ## Live Demo
 
+**https://manji1233.github.io/Uploadable-Liquid-Glass-Web-React/**
+
 Move your cursor over the image to see real-time refraction through the glass lens. Supports both mouse-follow and automatic wandering modes.
 
 ```
