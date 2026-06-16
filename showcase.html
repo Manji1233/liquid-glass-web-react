@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Liquid Glass — 液态玻璃折射引擎</title>
+<style>
+/* ═══════════════════════════════════════════
+   Reset & Variables
+   ═══════════════════════════════════════════ */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#06060b;
+  --surface:rgba(255,255,255,0.04);
+  --surface2:rgba(255,255,255,0.07);
+  --border:rgba(255,255,255,0.08);
+  --border2:rgba(255,255,255,0.15);
+  --text:rgba(255,255,255,0.88);
+  --text2:rgba(255,255,255,0.55);
+  --text3:rgba(255,255,255,0.3);
+  --accent:#6ea8fe;
+  --accent2:#c084fc;
+  --r:16px;--r-sm:10px;--r-lg:24px;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Segoe UI',Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;line-height:1.5;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+a:hover{opacity:.85}
+.glass{background:var(--surface);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);border:1px solid var(--border);border-radius:var(--r)}
+
+/* ═══════════ Nav ═══════════ */
+nav{position:fixed;top:0;left:0;right:0;z-index:900;padding:12px 24px;
+  display:flex;align-items:center;justify-content:space-between;
+  background:rgba(6,6,11,0.65);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);
+  border-bottom:1px solid var(--border)}
+nav .brand{font-size:15px;font-weight:600;letter-spacing:-.2px;display:flex;align-items:center;gap:8px}
+nav .brand span{font-size:20px}
+nav .links{display:flex;gap:20px}
+nav .links a{font-size:13px;color:var(--text2);transition:color .2s}
+nav .links a:hover{color:var(--text)}
+nav .badge{font-size:11px;padding:3px 10px;border-radius:20px;background:rgba(110,168,254,.12);color:var(--accent);border:1px solid rgba(110,168,254,.2)}
+
+/* ═══════════ Hero ═══════════ */
+.hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:100px 24px 60px;text-align:center;overflow:hidden}
+.hero::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 60% 50% at 50% 40%,rgba(110,168,254,.06) 0%,transparent 70%),radial-gradient(ellipse 40% 40% at 30% 70%,rgba(192,132,252,.04) 0%,transparent 60%);pointer-events:none}
+.hero-tag{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--accent);padding:6px 16px;border-radius:20px;background:rgba(110,168,254,.08);border:1px solid rgba(110,168,254,.15);margin-bottom:24px}
+.hero h1{font-size:clamp(38px,7vw,68px);font-weight:700;letter-spacing:-1.5px;line-height:1.05;margin-bottom:20px;background:linear-gradient(135deg,#fff 20%,rgba(255,255,255,.6) 80%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{font-size:clamp(15px,2.2vw,19px);color:var(--text2);max-width:580px;margin-bottom:36px;line-height:1.7}
+
+/* ═══════════ Demo Area ═══════════ */
+.demo-stage{width:100%;max-width:700px;position:relative}
+.demo-frame{position:relative;width:100%;border-radius:var(--r-lg);overflow:hidden;box-shadow:0 0 0 1px var(--border2),0 24px 80px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.3);cursor:none;background:#111}
+.demo-frame img,.demo-frame video{width:100%;height:100%;object-fit:cover;display:block}
+.demo-frame .filtered-layer{position:absolute;inset:0}
+.demo-hint{font-size:13px;color:var(--text3);display:flex;align-items:center;justify-content:center;gap:6px;margin-top:16px}
+.demo-hint .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 2s ease infinite}
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+
+/* ═══════════ Control Panel ═══════════ */
+.ctrl-toggle{position:fixed;top:16px;right:16px;z-index:500;width:42px;height:42px;border-radius:12px;border:1px solid var(--border2);background:rgba(28,28,30,.7);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:rgba(255,255,255,.8);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.3);transition:transform .2s}
+.ctrl-panel{position:fixed;top:16px;right:16px;z-index:400;width:280px;max-height:calc(100vh - 32px);overflow-y:auto;background:rgba(28,28,30,.78);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px;color:#fff;box-shadow:0 8px 40px rgba(0,0,0,.4);display:none}
+.ctrl-panel.open{display:block}
+.ctrl-panel h4{font-size:14px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:6px}
+.ctrl-panel .close-btn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.4);cursor:pointer;font-size:16px;padding:4px;line-height:1}
+
+/* Upload Zone */
+.upload-zone{border:1.5px dashed rgba(255,255,255,.15);border-radius:12px;padding:14px 12px;text-align:center;cursor:pointer;margin-bottom:16px;transition:border-color .2s,background .2s;background:rgba(255,255,255,.03)}
+.upload-zone:hover{border-color:rgba(110,168,254,.4);background:rgba(110,168,254,.05)}
+.upload-zone .icon{font-size:22px;margin-bottom:4px}
+.upload-zone .label{font-size:12px;color:rgba(255,255,255,.6);line-height:1.5}
+.upload-zone .sub{font-size:10px;color:rgba(255,255,255,.3);margin-top:2px}
+
+/* Sliders */
+.slider-group{margin-bottom:14px}
+.slider-group .slider-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.slider-group .slider-head span:first-child{font-size:12px;color:rgba(255,255,255,.7);font-weight:500}
+.slider-group .slider-head span:last-child{font-size:11px;font-family:'SF Mono','Fira Code',monospace;color:rgba(255,255,255,.45);min-width:48px;text-align:right}
+.slider-track{position:relative;height:22px;display:flex;align-items:center}
+.slider-track .bg{position:absolute;left:0;right:0;height:4px;border-radius:2px;background:rgba(255,255,255,.08)}
+.slider-track .fill{position:absolute;left:0;height:4px;border-radius:2px;background:linear-gradient(90deg,rgba(100,180,255,.6),rgba(160,120,255,.6))}
+.slider-track input[type="range"]{position:relative;width:100%;height:22px;margin:0;padding:0;-webkit-appearance:none;appearance:none;background:transparent;outline:none;cursor:pointer}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.4),0 0 0 .5px rgba(0,0,0,.1);cursor:pointer}
+input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;border:none;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer}
+
+.divider{height:1px;background:rgba(255,255,255,.06);margin:4px 0 14px}
+.reset-btn{width:100%;padding:8px 0;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);font-size:12px;font-weight:500;cursor:pointer;transition:all .2s}
+.reset-btn:hover{background:rgba(255,255,255,.1);color:rgba(255,255,255,.85)}
+.ctrl-footer{margin-top:14px;font-size:9.5px;color:rgba(255,255,255,.25);text-align:center;font-family:'SF Mono','Fira Code',monospace;line-height:1.6}
+
+/* ═══════════ Lens Overlay ═══════════ */
+.lens-overlay{position:absolute;width:260px;height:260px;border-radius:50%;pointer-events:none;z-index:50;display:none;
+  background:radial-gradient(ellipse at 32% 28%,rgba(255,255,255,.35) 0%,rgba(255,255,255,.12) 20%,rgba(255,255,255,.04) 45%,rgba(0,0,0,.04) 70%,rgba(0,0,0,.10) 100%);
+  border:1.5px solid rgba(255,255,255,.35);
+  box-shadow:0 0 0 .5px rgba(255,255,255,.12),0 10px 50px rgba(0,0,0,.5),0 4px 16px rgba(0,0,0,.3),inset 0 1.5px 0 rgba(255,255,255,.5),inset 0 -1px 0 rgba(255,255,255,.06),inset 1px 0 0 rgba(255,255,255,.08),inset -1px 0 0 rgba(255,255,255,.08);
+  backdrop-filter:blur(1.5px) saturate(1.5) brightness(1.06);-webkit-backdrop-filter:blur(1.5px) saturate(1.5) brightness(1.06)}
+.lens-hl{position:absolute;left:10%;top:6%;width:55%;height:32%;border-radius:50%;background:radial-gradient(ellipse at 50% 60%,rgba(255,255,255,.5) 0%,rgba(255,255,255,.15) 45%,transparent 100%)}
+.lens-rf{position:absolute;left:22%;bottom:10%;width:40%;height:18%;border-radius:50%;background:radial-gradient(ellipse at 50% 40%,rgba(255,255,255,.1) 0%,transparent 100%)}
+.lens-rb{position:absolute;inset:-1px;border-radius:50%;background:conic-gradient(from 200deg,transparent 0deg,rgba(255,100,100,.04) 60deg,rgba(100,255,100,.03) 120deg,rgba(100,100,255,.04) 180deg,rgba(255,200,100,.03) 240deg,transparent 360deg)}
+
+/* ═══════════ Section ═══════════ */
+.section{padding:100px 24px;max-width:1100px;margin:0 auto}
+.section-label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--accent);margin-bottom:12px}
+.section-title{font-size:clamp(26px,4vw,38px);font-weight:700;letter-spacing:-.8px;margin-bottom:16px}
+.section-desc{font-size:16px;color:var(--text2);max-width:600px;line-height:1.7;margin-bottom:48px}
+
+/* ═══════════ Feature Grid ═══════════ */
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.feature-card{padding:28px;transition:background .3s,border-color .3s,transform .3s}
+.feature-card:hover{background:var(--surface2);border-color:var(--border2);transform:translateY(-2px)}
+.feature-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:16px;background:rgba(110,168,254,.08);border:1px solid rgba(110,168,254,.12)}
+.feature-card h3{font-size:16px;font-weight:600;margin-bottom:8px}
+.feature-card p{font-size:13px;color:var(--text2);line-height:1.7}
+
+/* ═══════════ Pipeline ═══════════ */
+.pipeline{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;margin-top:12px}
+.pipeline-step{padding:14px 22px;border-radius:var(--r-sm);font-size:13px;font-weight:500;background:var(--surface);border:1px solid var(--border);transition:border-color .3s,background .3s;text-align:center;min-width:130px}
+.pipeline-step:hover{border-color:var(--border2);background:var(--surface2)}
+.pipeline-step .lbl{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.pipeline-arrow{font-size:18px;color:var(--text3)}
+
+/* ═══════════ Browsers ═══════════ */
+.browsers{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin-top:24px}
+.browser-item{display:flex;flex-direction:column;align-items:center;gap:10px;padding:24px 32px;min-width:140px}
+.browser-item .icon{font-size:36px}
+.browser-item .name{font-size:14px;font-weight:600}
+.browser-item .status{font-size:12px;color:#4ade80}
+
+/* ═══════════ Code Block ═══════════ */
+.code-block{background:rgba(0,0,0,.4);border:1px solid var(--border);border-radius:var(--r);padding:24px 28px;overflow-x:auto;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:13px;line-height:1.8;color:rgba(255,255,255,.7)}
+.code-block .kw{color:#c084fc}.code-block .fn{color:#6ea8fe}.code-block .str{color:#86efac}.code-block .cmt{color:rgba(255,255,255,.25)}.code-block .tag{color:#f472b6}.code-block .attr{color:#fbbf24}
+
+/* ═══════════ CTA ═══════════ */
+.cta{text-align:center;padding:100px 24px}
+.cta-buttons{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:32px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 28px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;border:none}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#000;box-shadow:0 4px 20px rgba(110,168,254,.25)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 30px rgba(110,168,254,.35)}
+.btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border2)}
+.btn-secondary:hover{background:var(--surface2);transform:translateY(-1px)}
+
+/* ═══════════ Footer ═══════════ */
+footer{padding:40px 24px;text-align:center;font-size:12px;color:var(--text3);border-top:1px solid var(--border)}
+
+/* ═══════════ Scroll Reveal ═══════════ */
+.reveal{opacity:0;transform:translateY(30px);transition:opacity .7s ease,transform .7s ease}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+/* ═══════════ Responsive ═══════════ */
+@media(max-width:768px){
+  nav .links{gap:12px}nav .links a{font-size:12px}
+  .features{grid-template-columns:1fr}
+  .pipeline{flex-direction:column}
+  .pipeline-arrow{transform:rotate(90deg)}
+  .browsers{gap:12px}
+  .browser-item{padding:16px 20px;min-width:100px}
+  .ctrl-panel{width:260px;right:8px;top:8px}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ Nav ═══════════ -->
+<nav>
+  <div class="brand"><span>🫧</span> Liquid Glass</div>
+  <div class="links">
+    <a href="#demo">Demo</a>
+    <a href="#how">原理</a>
+    <a href="#features">特性</a>
+    <a href="#code">代码</a>
+  </div>
+  <span class="badge">v1.0</span>
+</nav>
+
+<!-- ═══════════ Hero + Live Demo ═══════════ -->
+<section class="hero" id="demo">
+  <div class="hero-tag">SVG feDisplacementMap · Zero Flags · React</div>
+  <h1>液态玻璃<br>折射引擎</h1>
+  <p>生成位移贴图，通过 SVG feDisplacementMap 直接折射实时 DOM——Chrome、Safari、Firefox 桌面端和移动端原生支持，无需任何实验性标志。</p>
+
+  <div class="demo-stage">
+    <div class="demo-frame" id="demoFrame">
+      <canvas id="dCanvas" style="position:absolute;width:0;height:0;opacity:0;pointer-events:none"></canvas>
+      <svg style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+        <defs>
+          <filter id="lg-filter" x="-10%" y="-10%" width="120%" height="120%" colorInterpolationFilters="sRGB">
+            <feImage id="lg-feImage" result="dMap" preserveAspectRatio="none" x="0%" y="0%" width="100%" height="100%"/>
+            <feDisplacementMap id="lg-dispMap" in="SourceGraphic" in2="dMap" scale="55" xChannelSelector="R" yChannelSelector="G"/>
+          </filter>
+        </defs>
+      </svg>
+      <div class="filtered-layer" id="filteredLayer" style="filter:url(#lg-filter);-webkit-filter:url(#lg-filter)">
+        <img src="public/swan.jpg" alt="天鹅" id="demoMedia" draggable="false"/>
+      </div>
+      <div class="lens-overlay" id="lensOv">
+        <div class="lens-hl"></div><div class="lens-rf"></div><div class="lens-rb"></div>
+      </div>
+    </div>
+    <div class="demo-hint"><span class="dot"></span>移动鼠标到图片上体验实时折射 · 右上角 ⚙ 调节参数</div>
+  </div>
+</section>
+
+<!-- ═══════════ Control Panel Toggle ═══════════ -->
+<button class="ctrl-toggle" id="ctrlToggle" title="参数控制">⚙</button>
+
+<!-- ═══════════ Control Panel ═══════════ -->
+<div class="ctrl-panel" id="ctrlPanel">
+  <h4>🫧 参数调节 <button class="close-btn" id="ctrlClose">✕</button></h4>
+
+  <!-- Upload -->
+  <div class="upload-zone" id="uploadZone">
+    <div class="icon">📁</div>
+    <div class="label">点击或拖放上传图片/视频</div>
+    <div class="sub" id="mediaInfo">当前: 图片 · JPG / PNG / GIF / MP4 / WebM</div>
+    <input type="file" accept="image/*,video/*" id="fileInput" style="display:none"/>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Sliders -->
+  <div class="slider-group">
+    <div class="slider-head"><span>镜头半径</span><span id="v-radius">130px</span></div>
+    <div class="slider-track"><div class="bg"></div><div class="fill" id="f-radius"></div>
+      <input type="range" min="40" max="250" value="130" id="s-radius"/></div>
+  </div>
+  <div class="slider-group">
+    <div class="slider-head"><span>位移强度</span><span id="v-scale">55</span></div>
+    <div class="slider-track"><div class="bg"></div><div class="fill" id="f-scale"></div>
+      <input type="range" min="5" max="120" value="55" id="s-scale"/></div>
+  </div>
+  <div class="slider-group">
+    <div class="slider-head"><span>折射强度</span><span id="v-refract">85</span></div>
+    <div class="slider-track"><div class="bg"></div><div class="fill" id="f-refract"></div>
+      <input type="range" min="10" max="160" value="85" id="s-refract"/></div>
+  </div>
+  <div class="slider-group">
+    <div class="slider-head"><span>边缘宽度</span><span id="v-edge">22px</span></div>
+    <div class="slider-track"><div class="bg"></div><div class="fill" id="f-edge"></div>
+      <input type="range" min="0" max="60" value="22" id="s-edge"/></div>
+  </div>
+  <div class="slider-group">
+    <div class="slider-head"><span>色散强度</span><span id="v-chroma">6</span></div>
+    <div class="slider-track"><div class="bg"></div><div class="fill" id="f-chroma"></div>
+      <input type="range" min="0" max="20" step="0.5" value="6" id="s-chroma"/></div>
+  </div>
+
+  <div class="divider"></div>
+  <button class="reset-btn" id="resetBtn">↺ 恢复默认参数</button>
+  <div class="ctrl-footer">SVG feDisplacementMap<br/>Chrome ✓ Safari ✓ Firefox ✓</div>
+</div>
+
+<!-- ═══════════ How It Works ═══════════ -->
+<section class="section reveal" id="how">
+  <div class="section-label">How it works</div>
+  <div class="section-title">实时折射，三步完成</div>
+  <div class="section-desc">从 Canvas 像素级生成到位移映射，整个管线在浏览器原生 API 中运行——不需要 WebGL、不需要 OffscreenCanvas、不需要任何 Feature Flag。</div>
+  <div class="pipeline">
+    <div class="pipeline-step"><div class="lbl">Step 1</div>Canvas 生成位移贴图<br><span style="color:var(--text3);font-size:11px">R=X偏移 G=Y偏移</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="lbl">Step 2</div>feImage 引入贴图<br><span style="color:var(--text3);font-size:11px">base64 PNG 内联</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="lbl">Step 3</div>feDisplacementMap<br><span style="color:var(--text3);font-size:11px">扭曲 SourceGraphic</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step" style="border-color:rgba(110,168,254,.25);background:rgba(110,168,254,.06)"><div class="lbl">Result</div>🫧 实时折射效果</div>
+  </div>
+</section>
+
+<!-- ═══════════ Features ═══════════ -->
+<section class="section reveal" id="features">
+  <div class="section-label">Features</div>
+  <div class="section-title">为什么选择 Liquid Glass</div>
+  <div class="section-desc">不依赖任何实验性 API，完全基于 W3C 标准的 SVG Filter 规范，实现了苹果风格的液态玻璃折射效果。</div>
+  <div class="features">
+    <div class="feature-card glass"><div class="feature-icon">🎯</div><h3>实时 DOM 折射</h3><p>不是模拟、不是截图——feDisplacementMap 直接作用于渲染中的 DOM 内容，实时折射页面上的任何元素。</p></div>
+    <div class="feature-card glass"><div class="feature-icon">⚡</div><h3>Canvas 像素级位移</h3><p>逐像素计算球面折射强度，smoothstep 插值 + 二次衰减，精确模拟光学透镜的放大效果。</p></div>
+    <div class="feature-card glass"><div class="feature-icon">🌈</div><h3>边缘色散</h3><p>镜头边缘模拟棱镜色散，红/绿通道独立偏移产生微妙的彩虹折射效果。</p></div>
+    <div class="feature-card glass"><div class="feature-icon">🌍</div><h3>全浏览器原生支持</h3><p>Chrome、Safari、Firefox 桌面端和移动端全部支持，零 Feature Flag，无需回退方案。</p></div>
+    <div class="feature-card glass"><div class="feature-icon">🎬</div><h3>图片 & 视频支持</h3><p>镜头可以折射静态图片，也可以折射正在播放的视频——因为滤镜作用于 DOM 而非像素缓冲区。</p></div>
+    <div class="feature-card glass"><div class="feature-icon">🎛</div><h3>全参数可调</h3><p>镜头半径、位移强度、折射深度、边缘宽度、色散强度——所有参数实时调节，即时预览。</p></div>
+  </div>
+</section>
+
+<!-- ═══════════ Browser Support ═══════════ -->
+<section class="section reveal">
+  <div class="section-label">Compatibility</div>
+  <div class="section-title">全平台原生运行</div>
+  <div class="section-desc">基于 SVG 1.1 feDisplacementMap 规范（2003），所有现代浏览器均已完整支持。</div>
+  <div class="browsers">
+    <div class="browser-item glass"><div class="icon">🌐</div><div class="name">Chrome</div><div class="status">✓ 完整支持</div></div>
+    <div class="browser-item glass"><div class="icon">🧭</div><div class="name">Safari</div><div class="status">✓ 完整支持</div></div>
+    <div class="browser-item glass"><div class="icon">🦊</div><div class="name">Firefox</div><div class="status">✓ 完整支持</div></div>
+    <div class="browser-item glass"><div class="icon">📱</div><div class="name">Mobile</div><div class="status">✓ 完整支持</div></div>
+  </div>
+</section>
+
+<!-- ═══════════ Code ═══════════ -->
+<section class="section reveal" id="code">
+  <div class="section-label">Code</div>
+  <div class="section-title">核心实现</div>
+  <div class="section-desc">只需 SVG Filter + Canvas 位移贴图，即可在任何 React 项目中集成液态玻璃效果。</div>
+  <div class="code-block">
+<span class="cmt">// 1. Canvas 生成位移贴图 (R=X偏移, G=Y偏移)</span>
+<span class="kw">const</span> imageData = ctx.<span class="fn">createImageData</span>(w, h)
+<span class="kw">for</span> (<span class="kw">let</span> y = 0; y &lt; h; y++) {
+  <span class="kw">for</span> (<span class="kw">let</span> x = 0; x &lt; w; x++) {
+    <span class="kw">const</span> dist = <span class="fn">Math.sqrt</span>(dx*dx + dy*dy)
+    <span class="kw">const</span> strength = (1 - smoothT) * (1 - smoothT)
+    data[idx]     = <span class="str">128 + (-nx * strength * cap)</span>  <span class="cmt">// R → X</span>
+    data[idx + 1] = <span class="str">128 + (-ny * strength * cap)</span>  <span class="cmt">// G → Y</span>
+  }
+}
+
+<span class="cmt">// 2. SVG Filter 消费位移贴图</span>
+&lt;<span class="tag">filter</span> <span class="attr">id</span>=<span class="str">"liquid-glass"</span>&gt;
+  &lt;<span class="tag">feImage</span> <span class="attr">href</span>=<span class="str">"{canvas.toDataURL()}"</span> /&gt;
+  &lt;<span class="tag">feDisplacementMap</span>
+    <span class="attr">in</span>=<span class="str">"SourceGraphic"</span>
+    <span class="attr">in2</span>=<span class="str">"displacementMap"</span>
+    <span class="attr">scale</span>=<span class="str">"55"</span>
+    <span class="attr">xChannelSelector</span>=<span class="str">"R"</span>
+    <span class="attr">yChannelSelector</span>=<span class="str">"G"</span>
+  /&gt;
+&lt;/<span class="tag">filter</span>&gt;
+
+<span class="cmt">// 3. 应用到任意 DOM 元素</span>
+&lt;<span class="tag">div</span> <span class="attr">style</span>=<span class="str">{{ filter: 'url(#liquid-glass)' }}</span>&gt;
+  {children}
+&lt;/<span class="tag">div</span>&gt;
+  </div>
+</section>
+
+<!-- ═══════════ CTA ═══════════ -->
+<section class="cta reveal">
+  <div class="section-title" style="margin-bottom:12px">开始使用</div>
+  <p style="color:var(--text2);max-width:480px;margin:0 auto 32px">开源、轻量、零依赖。一行 filter 即可为你的 React 项目添加液态玻璃折射效果。</p>
+  <div class="cta-buttons">
+    <a href="https://github.com/Manji1233/liquid-glass-web-react" target="_blank" class="btn btn-primary">⭐ GitHub 仓库</a>
+    <a href="#demo" class="btn btn-secondary">↑ 回到 Demo</a>
+  </div>
+</section>
+
+<footer>
+  <p>Liquid Glass · SVG feDisplacementMap · Zero Experimental Flags</p>
+  <p style="margin-top:6px"><a href="https://github.com/Manji1233/liquid-glass-web-react" target="_blank">GitHub</a></p>
+</footer>
+
+<!-- ═══════════════════════════════════════════
+     JavaScript — 完整交互逻辑
+     ═══════════════════════════════════════════ -->
+<script>
+(function(){
+  /* ─── DOM Refs ─── */
+  const canvas   = document.getElementById('dCanvas')
+  const feImg    = document.getElementById('lg-feImage')
+  const dispMap  = document.getElementById('lg-dispMap')
+  const frame    = document.getElementById('demoFrame')
+  const lensOv   = document.getElementById('lensOv')
+  const filtered = document.getElementById('filteredLayer')
+  const demoMedia= document.getElementById('demoMedia')
+  const mediaInfo= document.getElementById('mediaInfo')
+
+  /* ─── 参数 ─── */
+  const DEFAULTS = { radius:130, scale:55, refract:85, edge:22, chroma:6 }
+  let P = { ...DEFAULTS }
+  const LERP = 0.05
+
+  let mouseX = -500, mouseY = -500
+  let smoothX = -500, smoothY = -500
+  let dims = { w:0, h:0 }
+  let mediaType = 'image'
+  let objectUrl = null
+
+  /* ─── 尺寸 ─── */
+  function updateDims(){
+    const r = frame.getBoundingClientRect()
+    dims.w = r.width; dims.h = r.height
+  }
+
+  /* ─── 位移贴图生成 ─── */
+  function generateMap(){
+    if(!canvas || dims.w===0 || dims.h===0) return
+    const dpr = dims.w>1000?0.4:dims.w>600?0.6:1
+    const w = Math.floor(dims.w*dpr), h = Math.floor(dims.h*dpr)
+    canvas.width=w; canvas.height=h
+    const ctx = canvas.getContext('2d',{willReadFrequently:true})
+    const img = ctx.createImageData(w,h), d = img.data
+
+    const cx=smoothX*dpr, cy=smoothY*dpr, r=P.radius*dpr, ew=P.edge*dpr, cap=P.refract
+    for(let i=0;i<d.length;i+=4){d[i]=128;d[i+1]=128;d[i+2]=128;d[i+3]=255}
+
+    const x0=Math.max(0,Math.floor(cx-r-ew)), x1=Math.min(w-1,Math.ceil(cx+r+ew))
+    const y0=Math.max(0,Math.floor(cy-r-ew)), y1=Math.min(h-1,Math.ceil(cy+r+ew))
+
+    for(let py=y0;py<=y1;py++){
+      for(let px=x0;px<=x1;px++){
+        const idx=(py*w+px)*4, dx=px-cx, dy=py-cy
+        const dist=Math.sqrt(dx*dx+dy*dy)
+        if(dist<r){
+          const t=dist/r, st=t*t*(3-2*t), s=(1-st)*(1-st)
+          const inv=dist>.5?1/dist:0, nx=dx*inv, ny=dy*inv
+          d[idx]=Math.round(Math.max(0,Math.min(255,128+(-nx*s*cap))))
+          d[idx+1]=Math.round(Math.max(0,Math.min(255,128+(-ny*s*cap))))
+        }else if(dist<r+ew && P.chroma>0){
+          const et=(dist-r)/ew, f=(1-et)*(1-et)
+          const inv=dist>.5?1/dist:0, nx=dx*inv, ny=dy*inv
+          const ch=f*P.chroma
+          d[idx]=Math.round(128+nx*ch); d[idx+1]=Math.round(128+ny*ch)
+        }
+      }
+    }
+    ctx.putImageData(img,0,0)
+    const url=canvas.toDataURL('image/png')
+    feImg.setAttributeNS('http://www.w3.org/1999/xlink','xlink:href',url)
+    feImg.setAttribute('href',url)
+  }
+
+  /* ─── 动画循环 ─── */
+  function animate(){
+    smoothX+=(mouseX-smoothX)*LERP
+    smoothY+=(mouseY-smoothY)*LERP
+    generateMap()
+    lensOv.style.left=(smoothX-P.radius)+'px'
+    lensOv.style.top=(smoothY-P.radius)+'px'
+    lensOv.style.width=P.radius*2+'px'
+    lensOv.style.height=P.radius*2+'px'
+    requestAnimationFrame(animate)
+  }
+
+  /* ─── 鼠标/触摸 ─── */
+  frame.addEventListener('mousemove',e=>{
+    const r=frame.getBoundingClientRect()
+    mouseX=e.clientX-r.left; mouseY=e.clientY-r.top
+    lensOv.style.display='block'
+  })
+  frame.addEventListener('mouseleave',()=>{
+    mouseX=-500;mouseY=-500; lensOv.style.display='none'
+  })
+  frame.addEventListener('touchmove',e=>{
+    e.preventDefault()
+    const t=e.touches[0]; if(!t) return
+    const r=frame.getBoundingClientRect()
+    mouseX=t.clientX-r.left; mouseY=t.clientY-r.top
+    lensOv.style.display='block'
+  },{passive:false})
+  frame.addEventListener('touchend',()=>{mouseX=-500;mouseY=-500;lensOv.style.display='none'})
+
+  /* ─── 控制面板 ─── */
+  const ctrlPanel=document.getElementById('ctrlPanel')
+  const ctrlToggle=document.getElementById('ctrlToggle')
+  const ctrlClose=document.getElementById('ctrlClose')
+  ctrlToggle.addEventListener('click',()=>ctrlPanel.classList.toggle('open'))
+  ctrlClose.addEventListener('click',()=>ctrlPanel.classList.remove('open'))
+
+  /* 滑块绑定 */
+  const sliders = [
+    { id:'radius', key:'radius', unit:'px', def:DEFAULTS.radius },
+    { id:'scale',  key:'scale',  unit:'',   def:DEFAULTS.scale },
+    { id:'refract',key:'refract',unit:'',   def:DEFAULTS.refract },
+    { id:'edge',   key:'edge',   unit:'px', def:DEFAULTS.edge },
+    { id:'chroma', key:'chroma', unit:'',   def:DEFAULTS.chroma },
+  ]
+  sliders.forEach(s=>{
+    const input=document.getElementById('s-'+s.id)
+    const valEl=document.getElementById('v-'+s.id)
+    const fillEl=document.getElementById('f-'+s.id)
+    function updateUI(){
+      const min=parseFloat(input.min), max=parseFloat(input.max), v=parseFloat(input.value)
+      valEl.textContent=v+s.unit
+      fillEl.style.width=((v-min)/(max-min)*100)+'%'
+    }
+    input.addEventListener('input',()=>{
+      P[s.key]=parseFloat(input.value)
+      if(s.key==='scale') dispMap.setAttribute('scale',P.scale)
+      updateUI()
+    })
+    updateUI()
+  })
+
+  /* 重置 */
+  document.getElementById('resetBtn').addEventListener('click',()=>{
+    P={...DEFAULTS}
+    sliders.forEach(s=>{
+      const input=document.getElementById('s-'+s.id)
+      input.value=s.def
+      input.dispatchEvent(new Event('input'))
+    })
+    dispMap.setAttribute('scale',P.scale)
+  })
+
+  /* ─── 文件上传 ─── */
+  const uploadZone=document.getElementById('uploadZone')
+  const fileInput=document.getElementById('fileInput')
+
+  uploadZone.addEventListener('click',()=>fileInput.click())
+  uploadZone.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation()})
+  uploadZone.addEventListener('drop',e=>{
+    e.preventDefault();e.stopPropagation()
+    const f=e.dataTransfer.files?.[0]; if(f) loadFile(f)
+  })
+  fileInput.addEventListener('change',e=>{
+    const f=e.target.files?.[0]; if(f) loadFile(f)
+    e.target.value=''
+  })
+
+  function loadFile(file){
+    const isVideo=file.type.startsWith('video/')
+    if(objectUrl) URL.revokeObjectURL(objectUrl)
+    objectUrl=URL.createObjectURL(file)
+    mediaType=isVideo?'video':'image'
+    mediaInfo.textContent='当前: '+(isVideo?'视频':'图片')+' · '+file.name
+
+    const filteredLayer=document.getElementById('filteredLayer')
+    filteredLayer.innerHTML=''
+
+    if(isVideo){
+      const v=document.createElement('video')
+      v.src=objectUrl; v.autoplay=true; v.loop=true; v.muted=true; v.playsInline=true
+      v.style.cssText='width:100%;height:100%;object-fit:cover;display:block'
+      v.addEventListener('loadedmetadata',()=>updateDims())
+      filteredLayer.appendChild(v)
+    }else{
+      const img=document.createElement('img')
+      img.src=objectUrl; img.draggable=false
+      img.style.cssText='width:100%;height:100%;object-fit:cover;display:block'
+      img.onload=()=>updateDims()
+      filteredLayer.appendChild(img)
+    }
+  }
+
+  /* ─── Scroll Reveal ─── */
+  const obs=new IntersectionObserver(es=>{
+    es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('visible')})
+  },{threshold:0.15})
+  document.querySelectorAll('.reveal').forEach(el=>obs.observe(el))
+
+  /* ─── Init ─── */
+  window.addEventListener('resize',updateDims)
+  updateDims()
+  requestAnimationFrame(animate)
+})()
+</script>
+</body>
+</html>
