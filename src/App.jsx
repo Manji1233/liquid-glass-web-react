@@ -3,6 +3,7 @@ import {
   useDisplacementMap,
   LiquidGlassSVGFilter,
   LiquidGlassLens,
+  useBgColorSampler,
 } from './hooks/useDisplacementMap.jsx'
 import ControlPanel from './components/ControlPanel.jsx'
 
@@ -191,6 +192,14 @@ export default function App() {
     size, strength, curvature, chroma, depth, splay,
   })
 
+  /* ─── 背景色采样 ─── */
+  const mediaElRef = useRef(null)
+  const bgColor = useBgColorSampler(
+    mediaElRef, mediaType,
+    smoothPos.x, smoothPos.y, size,
+    isActive && smoothPos.x > -100
+  )
+
   /* ─── 底图 CSS filter ─── */
   const bgFilter = `brightness(${bgBrightness}%) contrast(${bgContrast}%) saturate(${bgSaturate}%)`
 
@@ -243,7 +252,7 @@ export default function App() {
           <div style={{ position: 'absolute', inset: 0, filter: `url(#${FILTER_ID})`, WebkitFilter: `url(#${FILTER_ID})` }}>
             {mediaType === 'video' ? (
               <video
-                ref={videoRef}
+                ref={(el) => { videoRef.current = el; mediaElRef.current = el }}
                 src={mediaSrc}
                 onLoadedMetadata={handleVideoLoad}
                 autoPlay loop muted playsInline
@@ -257,6 +266,7 @@ export default function App() {
               />
             ) : (
               <img
+                ref={mediaElRef}
                 src={mediaSrc}
                 alt="Media"
                 onLoad={handleImageLoad}
@@ -283,6 +293,8 @@ export default function App() {
               glow={glow}
               specularAngle={specularAngle}
               chroma={chroma}
+              depth={depth}
+              bgColor={bgColor}
             />
           )}
         </div>
