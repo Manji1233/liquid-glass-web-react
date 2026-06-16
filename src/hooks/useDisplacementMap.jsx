@@ -3,15 +3,21 @@ import React, { useRef, useEffect, useCallback } from 'react'
 /**
  * useDisplacementMap - 核心位移贴图生成 Hook
  *
- * 增强: Fresnel 衰减 + 焦散亮点 + 球面折射
+ * 参数映射:
+ *   Size       → lensRadius (px)
+ *   Strength   → feDisplacementMap.scale (×1000)
+ *   Curvature  → 折射衰减指数 (0=线性 1=强球面)
+ *   Chroma     → 色散强度 (×20)
+ *   Depth      → 折射深度 (×1.6)
+ *   Splay      → 边缘扩展因子
  */
 export function useDisplacementMap({
   width,
   height,
   mouseX,
   mouseY,
-  size = 100,
-  strength = 0.08,
+  size = 210,
+  strength = 0.060,
   curvature = 0.41,
   chroma = 0.50,
   depth = 26,
@@ -38,10 +44,10 @@ export function useDisplacementMap({
     const cx = mouseX * dpr
     const cy = mouseY * dpr
     const r = size * dpr
-    const ew = size * 0.12 * splay * dpr
-    const cap = depth * 1.6
-    const chr = chroma * 20
-    const curvExp = 1 + curvature * 3
+    const ew = size * 0.12 * splay * dpr  // 边缘宽度由 Size 和 Splay 决定
+    const cap = depth * 1.6                 // 折射深度映射
+    const chr = chroma * 20                 // 色散映射
+    const curvExp = 1 + curvature * 3       // 曲率指数: 1(线性) → 4(强球面)
 
     for (let i = 0; i < data.length; i += 4) {
       data[i] = 128; data[i + 1] = 128; data[i + 2] = 128; data[i + 3] = 255
@@ -61,43 +67,28 @@ export function useDisplacementMap({
 
         if (dist < r) {
           const t = dist / r
-          const smoothT = t * t * (3 - 2 * t)
-
-          // Fresnel 衰减: 边缘折射减弱，反射增强
-          // 在 t > 0.7 时快速衰减位移量，模拟真实玻璃的 Fresnel 效应
-          let refractionStrength = Math.pow(1 - smoothT, curvExp)
-          if (t > 0.7) {
-            const fresnelFade = 1 - ((t - 0.7) / 0.3)
-            refractionStrength *= fresnelFade * fresnelFade
-          }
+          const smoothT = t * t * (3 - 2 * t) // smoothstep
+          const refractionStrength = Math.pow(1 - smoothT, curvExp) // 曲率控制衰减
 
           const invDist = dist > 0.5 ? 1 / dist : 0
           const nx = dx * invDist
           const ny = dy * invDist
 
-          // 向中心的折射偏移 (放大镜效果)
+          // 向中心的折射偏移
           const dispX = -nx * refractionStrength * cap
           const dispY = -ny * refractionStrength * cap
 
           data[idx]     = Math.round(Math.max(0, Math.min(255, 128 + dispX)))
           data[idx + 1] = Math.round(Math.max(0, Math.min(255, 128 + dispY)))
-
-          // B 通道: 焦散亮点编码
-          // 在焦点下方 (略偏移) 编码一个亮度峰值
-          const focalY = cy + r * 0.15  // 焦点略低于中心
-          const focalDist = Math.sqrt(dx * dx + (py - focalY) * (py - focalY))
-          const focalRadius = r * 0.35
-          if (focalDist < focalRadius) {
-            const focalT = focalDist / focalRadius
-            const focalBright = (1 - focalT * focalT) * depth * 0.3
-            data[idx + 2] = Math.round(Math.min(255, 128 + focalBright))
-          }
         } else if (dist < r + ew && chr > 0) {
+          // 边缘色散: splay 控制向外扩展的偏转
           const edgeT = (dist - r) / ew
           const fade = (1 - edgeT) * (1 - edgeT)
           const invDist = dist > 0.5 ? 1 / dist : 0
           const nx = dx * invDist
           const ny = dy * invDist
+
+          // splay=1 时向外扩散, splay=0 时无色散
           const outward = splay * 1.5
           const chromatic = fade * chr
           data[idx]     = Math.round(128 + nx * chromatic * outward)
@@ -133,12 +124,11 @@ export function useDisplacementMap({
 
 /**
  * LiquidGlassSVGFilter - SVG 滤镜
- * 增加 feComponentTransfer 用于焦散亮度增强
  */
 export function LiquidGlassSVGFilter({
   feImageRef,
   filterId = 'liquid-glass',
-  strength = 0.08,
+  strength = 0.060,
 }) {
   return (
     <svg
@@ -177,44 +167,36 @@ export function LiquidGlassSVGFilter({
 }
 
 /**
- * LiquidGlassLens - 真实 3D 玻璃珠镜头视觉层
+ * LiquidGlassLens - 液态玻璃镜头视觉层
  *
- * 物理效果:
- * - Fresnel 反射: 边缘更不透明/反光
- * - 焦散光斑: 球面聚焦的光线
- * - 内反射暗环: 全内反射产生的暗边
- * - 背景色着色: 玻璃吸收/散射底色
- * - 地面阴影: 球体投射的阴影
+ * 参数:
+ *   size           → 镜头半径
+ *   blur           → 背景模糊
+ *   edgeHighlight  → 边缘高光亮度
+ *   glow           → 外发光强度
+ *   specularAngle  → 高光方向 (角度)
+ *   chroma         → 色散强度 (影响彩虹环)
  */
 export function LiquidGlassLens({
   mouseX = 0,
   mouseY = 0,
-  size = 100,
+  size = 210,
   blur = 0.0,
   edgeHighlight = 0.80,
   glow = 0.80,
   specularAngle = 130,
   chroma = 0.50,
-  depth = 26,
-  bgColor = null,  // {r, g, b} 从底图采样
 }) {
-  // 高光位置
+  // 高光位置: 光从 specularAngle 方向来 → 高光在对侧
   const angleRad = ((specularAngle + 180) * Math.PI) / 180
-  const hlX = 50 + 30 * Math.sin(angleRad)
-  const hlY = 50 - 30 * Math.cos(angleRad)
+  const hlX = 50 + 30 * Math.sin(angleRad) // %
+  const hlY = 50 - 30 * Math.cos(angleRad) // %
 
-  // 背景色着色
-  const bgR = bgColor ? bgColor.r : 255
-  const bgG = bgColor ? bgColor.g : 255
-  const bgB = bgColor ? bgColor.b : 255
-  const bgTintAlpha = bgColor ? 0.12 : 0  // 着色强度
-
-  const borderAlpha = 0.15 + edgeHighlight * 0.3
-  const insetAlpha = edgeHighlight * 0.45
-  const glowSpread = 4 + glow * 14
-  const glowAlpha = glow * 0.45
-  const chromaAlpha = chroma * 0.06
-  const shadowOffset = Math.round(size * 0.15 + 6)
+  const borderAlpha = 0.2 + edgeHighlight * 0.35
+  const insetAlpha = edgeHighlight * 0.5
+  const glowSpread = 4 + glow * 12
+  const glowAlpha = glow * 0.5
+  const chromaAlpha = chroma * 0.08
 
   return (
     <div
@@ -228,108 +210,67 @@ export function LiquidGlassLens({
         borderRadius: '50%',
         pointerEvents: 'none',
         zIndex: 100,
-        // Fresnel 渐变: 中心透明 → 边缘反射增强
         background: `
           radial-gradient(
-            circle at 50% 50%,
-            rgba(${bgR}, ${bgG}, ${bgB}, ${bgTintAlpha * 0.3}) 0%,
-            rgba(255, 255, 255, 0.01) 20%,
-            rgba(255, 255, 255, ${0.02 + edgeHighlight * 0.04}) 40%,
-            rgba(255, 255, 255, ${0.06 + edgeHighlight * 0.08}) 55%,
-            rgba(255, 255, 255, ${0.12 + edgeHighlight * 0.12}) 70%,
-            rgba(255, 255, 255, ${0.20 + edgeHighlight * 0.15}) 82%,
-            rgba(255, 255, 255, ${0.28 + edgeHighlight * 0.12}) 92%,
-            rgba(255, 255, 255, ${0.18 + edgeHighlight * 0.08}) 100%
+            ellipse at ${hlX}% ${hlY}%,
+            rgba(255, 255, 255, ${0.15 + edgeHighlight * 0.2}) 0%,
+            rgba(255, 255, 255, ${0.04 + edgeHighlight * 0.08}) 25%,
+            rgba(255, 255, 255, 0.02) 50%,
+            rgba(0, 0, 0, 0.03) 75%,
+            rgba(0, 0, 0, 0.08) 100%
           )
         `,
-        border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
+        border: `1.5px solid rgba(255, 255, 255, ${borderAlpha})`,
         boxShadow: `
-          0 0 0 0.5px rgba(255, 255, 255, 0.08),
-          0 ${shadowOffset}px ${shadowOffset * 3}px rgba(0, 0, 0, ${glowAlpha}),
-          0 2px ${glowSpread}px rgba(0, 0, 0, ${glowAlpha * 0.5}),
-          inset 0 2px 4px rgba(255, 255, 255, ${insetAlpha * 0.6}),
-          inset 0 -1px 0 rgba(255, 255, 255, ${insetAlpha * 0.15}),
-          inset 1px 0 0 rgba(255, 255, 255, ${insetAlpha * 0.2}),
-          inset -1px 0 0 rgba(255, 255, 255, ${insetAlpha * 0.2})
+          0 0 0 0.5px rgba(255, 255, 255, 0.1),
+          0 ${glowSpread}px ${glowSpread * 4}px rgba(0, 0, 0, ${glowAlpha}),
+          0 4px ${glowSpread}px rgba(0, 0, 0, ${glowAlpha * 0.6}),
+          inset 0 1.5px 0 rgba(255, 255, 255, ${insetAlpha}),
+          inset 0 -1px 0 rgba(255, 255, 255, ${insetAlpha * 0.12}),
+          inset 1px 0 0 rgba(255, 255, 255, ${insetAlpha * 0.16}),
+          inset -1px 0 0 rgba(255, 255, 255, ${insetAlpha * 0.16})
         `,
         backdropFilter: blur > 0
-          ? `blur(${blur}px) saturate(${1.2 + blur * 0.04}) brightness(${1.02 + blur * 0.01})`
-          : 'saturate(1.2) brightness(1.02)',
+          ? `blur(${blur}px) saturate(${1.3 + blur * 0.05}) brightness(${1.03 + blur * 0.01})`
+          : 'saturate(1.3) brightness(1.03)',
         WebkitBackdropFilter: blur > 0
-          ? `blur(${blur}px) saturate(${1.2 + blur * 0.04}) brightness(${1.02 + blur * 0.01})`
-          : 'saturate(1.2) brightness(1.02)',
+          ? `blur(${blur}px) saturate(${1.3 + blur * 0.05}) brightness(${1.03 + blur * 0.01})`
+          : 'saturate(1.3) brightness(1.03)',
       }}
     >
-      {/* ── 主高光 (Specular) ── */}
+      {/* 主高光 */}
       <div style={{
         position: 'absolute',
-        left: `${hlX - 22}%`, top: `${hlY - 14}%`,
-        width: '44%', height: '28%',
+        left: `${hlX - 25}%`, top: `${hlY - 15}%`,
+        width: '50%', height: '30%',
         borderRadius: '50%',
         background: `radial-gradient(
-          ellipse at 50% 55%,
-          rgba(255, 255, 255, ${0.35 + edgeHighlight * 0.35}) 0%,
-          rgba(255, 255, 255, ${0.1 + edgeHighlight * 0.12}) 40%,
+          ellipse at 50% 60%,
+          rgba(255,255,255,${edgeHighlight * 0.5}) 0%,
+          rgba(255,255,255,${edgeHighlight * 0.15}) 45%,
           transparent 100%
         )`,
         pointerEvents: 'none',
       }} />
-
-      {/* ── 焦散光斑 (Caustic) ── */}
+      {/* 二次反射 */}
       <div style={{
         position: 'absolute',
-        left: '25%', top: '55%',
-        width: '50%', height: '35%',
+        left: `${100 - hlX - 15}%`, top: `${100 - hlY - 8}%`,
+        width: '35%', height: '16%',
         borderRadius: '50%',
         background: `radial-gradient(
           ellipse at 50% 40%,
-          rgba(255, 255, 255, ${0.06 + depth * 0.004}) 0%,
-          rgba(${bgR}, ${bgG}, ${bgB}, ${0.04 + depth * 0.002}) 30%,
-          transparent 75%
-        )`,
-        pointerEvents: 'none',
-      }} />
-
-      {/* ── 二次反射 (Secondary Reflection) ── */}
-      <div style={{
-        position: 'absolute',
-        left: `${100 - hlX - 12}%`, top: `${100 - hlY - 6}%`,
-        width: '28%', height: '14%',
-        borderRadius: '50%',
-        background: `radial-gradient(
-          ellipse at 50% 40%,
-          rgba(255, 255, 255, ${glow * 0.08}) 0%,
+          rgba(255,255,255,${glow * 0.1}) 0%,
           transparent 100%
         )`,
         pointerEvents: 'none',
       }} />
-
-      {/* ── 内反射暗环 (Total Internal Reflection Ring) ── */}
+      {/* 外光环 */}
       <div style={{
-        position: 'absolute',
-        inset: '8%',
-        borderRadius: '50%',
-        boxShadow: `inset 0 0 ${size * 0.15}px ${size * 0.03}px rgba(0, 0, 0, ${0.06 + (1 - edgeHighlight) * 0.04})`,
-        pointerEvents: 'none',
+        position: 'absolute', inset: -4, borderRadius: '50%',
+        border: '1px solid rgba(255,255,255,0.04)', pointerEvents: 'none',
       }} />
-
-      {/* ── 背景色散射着色层 ── */}
-      {bgColor && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          borderRadius: '50%',
-          background: `radial-gradient(
-            circle at 50% 45%,
-            rgba(${bgR}, ${bgG}, ${bgB}, ${bgTintAlpha * 0.5}) 0%,
-            rgba(${bgR}, ${bgG}, ${bgB}, ${bgTintAlpha * 0.2}) 40%,
-            rgba(${bgR}, ${bgG}, ${bgB}, ${bgTintAlpha}) 70%,
-            transparent 100%
-          )`,
-          pointerEvents: 'none',
-        }} />
-      )}
-
-      {/* ── 边缘色散彩虹环 ── */}
+      {/* 边缘色散彩虹 */}
       <div style={{
         position: 'absolute', inset: -1, borderRadius: '50%',
         background: `conic-gradient(
@@ -343,75 +284,6 @@ export function LiquidGlassLens({
         )`,
         pointerEvents: 'none',
       }} />
-
-      {/* ── 外光环 ── */}
-      <div style={{
-        position: 'absolute', inset: -5, borderRadius: '50%',
-        border: '1px solid rgba(255, 255, 255, 0.03)', pointerEvents: 'none',
-      }} />
     </div>
   )
-}
-
-/**
- * useBgColorSampler - 从媒体元素采样镜头下方的背景色
- *
- * 使用临时 Canvas 读取指定区域的平均颜色
- */
-export function useBgColorSampler(mediaRef, mediaType, lensX, lensY, lensRadius, isActive) {
-  const bgColorRef = useRef({ r: 200, g: 200, b: 200 })
-  const lastSampleRef = useRef(0)
-
-  useEffect(() => {
-    if (!isActive || !mediaRef.current || lensX < 0) return
-
-    const now = performance.now()
-    if (now - lastSampleRef.current < 100) return  // 节流: 100ms
-    lastSampleRef.current = now
-
-    const media = mediaRef.current
-    const canvas = document.createElement('canvas')
-    const sampleSize = 32
-    canvas.width = sampleSize
-    canvas.height = sampleSize
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-
-    try {
-      // 计算采样区域 (镜头中心一小块)
-      const mw = media.videoWidth || media.naturalWidth || media.clientWidth
-      const mh = media.videoHeight || media.naturalHeight || media.clientHeight
-      const cw = media.clientWidth
-      const ch = media.clientHeight
-
-      if (mw === 0 || mh === 0) return
-
-      const scaleX = mw / cw
-      const scaleY = mh / ch
-      const sx = (lensX - lensRadius * 0.3) * scaleX
-      const sy = (lensY - lensRadius * 0.3) * scaleY
-      const sw = lensRadius * 0.6 * scaleX
-      const sh = lensRadius * 0.6 * scaleY
-
-      ctx.drawImage(media, sx, sy, sw, sh, 0, 0, sampleSize, sampleSize)
-      const imgData = ctx.getImageData(0, 0, sampleSize, sampleSize)
-      const d = imgData.data
-      let rSum = 0, gSum = 0, bSum = 0, count = 0
-
-      for (let i = 0; i < d.length; i += 16) {  // 每4个像素采样1个
-        rSum += d[i]; gSum += d[i + 1]; bSum += d[i + 2]; count++
-      }
-
-      if (count > 0) {
-        bgColorRef.current = {
-          r: Math.round(rSum / count),
-          g: Math.round(gSum / count),
-          b: Math.round(bSum / count),
-        }
-      }
-    } catch (e) {
-      // 跨域图片可能无法读取，使用默认色
-    }
-  }, [lensX, lensY, lensRadius, isActive, mediaType])
-
-  return bgColorRef.current
 }
